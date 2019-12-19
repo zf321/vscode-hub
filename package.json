@@ -14,5 +14,8 @@
     "passport-github": "1.1.0",
     "xterm": "^3.12.1"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "jshint": "^2.11.0-rc1"
+  }
 }
