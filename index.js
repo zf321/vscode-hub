@@ -1,26 +1,20 @@
-"use strict";
 
 var
     express = require("express"),
     cookieParser = require("cookie-parser"),
     expressSession = require("express-session"),
     bodyParser = require("body-parser"),
-    Docker = require("dockerode"),
     crypto = require("crypto"),
     http = require("http"),
     fs = require('fs');
 
-var containers = {},
-    last_access = {},
+
+var 
     settings = require("./settings.json"),
-    ipaddr = {},
-    users = {},
-    initPort = 40000
-    ;
-
-
-var docker = new Docker({ socketPath: '/var/run/docker.sock' });
-
+    initPort = 40000,
+    db = require("./storage"),
+    docker = require("./docker");
+    
 
 var app = express();
 
@@ -32,43 +26,6 @@ app.use(bodyParser.json());
 const sessionParser = expressSession({ secret: crypto.randomBytes(10).toString("hex"), resave: true, saveUninitialized: true });
 app.use(sessionParser);
 
-function getIP(container, callback) {
-    container.inspect(function (err, data) {
-        var ip = data.NetworkSettings.IPAddress;
-        if (!ip) {
-            getIP(container, callback);
-        }
-        else {
-            callback(ip);
-        }
-    });
-}
-
-function waitForConn(addr, port, callback) {
-    http.get({ host: addr, port: port, path: "/" }, function (res) {
-        callback();
-    }).on('error', function (e) {
-        waitForConn(addr, port, callback);
-    });
-}
-
-function removeContainer(container, callback) {
-    container.kill(function (err, result) {
-        if (err) {
-            console.log(err);
-            callback();
-        }
-        else {
-            container.remove(function (err, result) {
-                if (err) {
-                    console.log(err);
-                }
-                callback();
-            });
-        }
-    });
-}
-
 
 app.get("/user/:user",
     function (req, res) {
@@ -78,7 +35,7 @@ app.get("/user/:user",
             res.redirect("/deny");
             return;
         }
-        reapContainers();
+        docker.reapContainers();
 
         if (user in users && users[user] in containers) {
             last_access[users[user]] = (new Date()).getTime();
@@ -94,7 +51,7 @@ app.get("/user/:user",
                 if (err.code !== 'EEXIST') throw err
             }
 
-            docker.run(image_name, ["--auth", "none"], undefined, {
+            docker.docker.run(image_name, ["--auth", "none"], undefined, {
                 "Hostconfig": {
                     "Memory": settings.images[image_name].max_memory,
                     "DiskQuota": settings.images[image_name].disk_quota,
@@ -107,7 +64,7 @@ app.get("/user/:user",
             }).on('container', function (container) {
                 containers[user] = container;
                 var ip = "127.0.0.1";
-                waitForConn(ip, port, function () {
+                docker.waitForConn(ip, port, function () {
                     ipaddr[user] = ip + ":" + port;
                     res.redirect("http://" + ipaddr[user]);
                 });
@@ -124,7 +81,7 @@ function exitHandler() {
     for (var token in containers) {
         var container = containers[token];
         delete containers[token];
-        removeContainer(container, function () {
+        docker.removeContainer(container, function () {
             exitHandler();
         });
 
@@ -133,22 +90,6 @@ function exitHandler() {
     process.exit();
 }
 
-function reapContainers() {
-    var timestamp = (new Date()).getTime();
-    for (var token in containers) {
-        if (timestamp - last_access[token] > settings.time_out) {
-            console.log(token, "has timed out");
-            var container = containers[token];
-            delete containers[token];
-
-            removeContainer(container, function () {
-                reapContainers();
-            });
-
-            return;
-        }
-    }
-}
 
 process.on('exit', exitHandler.bind());
 process.on('SIGINT', exitHandler.bind());
@@ -171,4 +112,4 @@ server.on("upgrade", function (req, socket, head) {
 server.on("error", err => console.log(err));
 
 server.listen(settings.port);
-setInterval(reapContainers, settings.time_out);
+setInterval(docker.reapContainers, settings.time_out);
