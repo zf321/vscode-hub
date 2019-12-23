@@ -1,20 +1,25 @@
-
+'use strict'
 var
     express = require("express"),
     cookieParser = require("cookie-parser"),
     expressSession = require("express-session"),
     bodyParser = require("body-parser"),
     crypto = require("crypto"),
+    fs = require('fs'),
     http = require("http"),
     fs = require('fs');
 
 
-var 
+var containers = {},
+    last_access = {},
     settings = require("./settings.json"),
+    ipaddr = {},
+    users = {},
     initPort = 40000,
-    db = require("./storage"),
+    git = require("./git"),
     docker = require("./docker");
-    
+
+
 
 var app = express();
 
@@ -23,6 +28,7 @@ app.set('view engine', 'ejs');
 
 app.use(cookieParser());
 app.use(bodyParser.json());
+app.use(express.urlencoded({ extended: true }));
 const sessionParser = expressSession({ secret: crypto.randomBytes(10).toString("hex"), resave: true, saveUninitialized: true });
 app.use(sessionParser);
 
@@ -57,13 +63,13 @@ app.get("/user/:user",
                     "DiskQuota": settings.images[image_name].disk_quota,
                     "Binds": [__dirname + "/users/" + user + "/project:/home/coder/project",
                     __dirname + "/users/" + user + "/.local/share/code-server:/home/coder/.local/share/code-server"],
-                    "PortBindings": { "8080/tcp": [{ "HostPort": ""+port }] }
+                    "PortBindings": { "8080/tcp": [{ "HostPort": "" + port }] }
                 }
             }, function (err, data, container) {
                 console.log(err);
             }).on('container', function (container) {
                 containers[user] = container;
-                var ip = "127.0.0.1";
+                var ip = settings.ip;
                 docker.waitForConn(ip, port, function () {
                     ipaddr[user] = ip + ":" + port;
                     res.redirect("http://" + ipaddr[user]);
@@ -74,6 +80,21 @@ app.get("/user/:user",
 
 app.get("/deny", function (req, res) {
     res.render("deny");
+});
+
+app.post("/user/:user/gitclone", function (req, res) {
+    var user = req.params.user;
+    var url = req.body.url;
+    var projectName = url.substring(url.lastIndexOf("/") + 1).replace(".git", "");
+    var path = __dirname + "/users/" + user + "/project/" + projectName;
+    git.clone(path, url, function (output, hasError) {
+
+        if (hasError) {
+            res.render(output);
+            return;
+        }
+        res.redirect("/user/" + user);
+    });
 });
 
 

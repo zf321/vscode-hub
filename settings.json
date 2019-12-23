@@ -1,5 +1,6 @@
 {
   "whitelist": [  ],
+  "ip":"127.0.0.1",
   "port": 80,
   "images": {
     "codercom/code-server:v2": {
